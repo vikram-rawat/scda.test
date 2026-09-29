@@ -53,7 +53,8 @@ VignetteBuilder:
     knitr
 Remotes:
     johnsonandjohnson/junco@feat/remove-s-proportion-diff-j-442,
-    johnsonandjohnson/pharmaversesdtmjnj@release-candidate-v0.0.6,
+    johnsonandjohnson/pharmaversesdtmjnj@main,
+    johnsonandjohnson/pharmaverseadamjnj@main,
     pharmaverse/formatters@main,
     pharmaverse/pharmaverseadam@main,
     pharmaverse/rlistings@main,
