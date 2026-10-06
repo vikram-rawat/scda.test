@@ -124,7 +124,7 @@ message("📂 dev/ restored! 🎯")
 # Commit --- add dev/ back to history -------------------------
 
 run_git("add", "dev/")
-run_git("commit", "-m", "chore: preserve dev/ after upstream sync")
+run_git("commit", "-m", "'chore: preserve dev/ after upstream sync'")
 message("📝 dev/ committed!")
 
 # Housekeeping --- re-add dev/ exclusion to .Rbuildignore ------
