@@ -4,6 +4,7 @@
 
 upstream <- "upstream"
 branch <- "main"
+dev_branch <- "dev_scripts"
 dev_pattern <- "^dev/"
 
 # Preflight --- check dependencies ----------------------------
@@ -34,16 +35,26 @@ repo_root <- trimws(run_git("rev-parse", "--show-toplevel"))
 setwd(repo_root)
 message(sprintf("📁 Repo root: %s", repo_root))
 
-scripts_dir <- file.path(repo_root, "dev", "scripts")
 is_windows <- .Platform$OS.type == "windows"
 
-# Preflight --- verify upstream remote exists -----------------
+# Preflight --- verify remotes exist --------------------------
 
 remotes <- run_git("remote")
 if (!upstream %in% remotes) {
   stop(sprintf(
     "🚨 Remote '%s' not found. Run:\ngit remote add %s https://github.com/insightsengineering/scda.test.git",
     upstream, upstream
+  ))
+}
+
+# Preflight --- verify dev_scripts branch exists --------------
+
+all_branches <- run_git("branch", "-a")
+has_dev_branch <- any(grepl(dev_branch, all_branches, fixed = TRUE))
+if (!has_dev_branch) {
+  stop(sprintf(
+    "🚨 Branch '%s' not found. Run:\ngit checkout -b %s && git push origin %s && git checkout main",
+    dev_branch, dev_branch, dev_branch
   ))
 }
 
@@ -55,17 +66,20 @@ if (current_branch != branch) {
   run_git("checkout", branch)
 }
 
-# Template --- read and fill ----------------------------------
+# Template --- read from dev_scripts branch -------------------
 
 template_file <- if (is_windows) "sync_upstream.ps1" else "sync_upstream.sh"
-template_path <- file.path(scripts_dir, template_file)
+template_ref <- sprintf("%s:dev/scripts/%s", dev_branch, template_file)
 
-if (!file.exists(template_path)) {
-  stop(sprintf("🚨 Template not found: %s", template_path))
-}
+template_content <- tryCatch(
+  run_git("show", template_ref),
+  error = function(e) {
+    stop(sprintf("🚨 Template not found in branch '%s': %s", dev_branch, template_ref))
+  }
+)
 
 filled_script <- glue::glue(
-  readLines(template_path) |> paste(collapse = "\n"),
+  paste(template_content, collapse = "\n"),
   upstream = upstream,
   branch = branch,
   .open = "{{",
@@ -96,10 +110,22 @@ if (is.null(status)) status <- 0L
 cat(result, sep = "\n")
 
 if (status != 0L) {
-  stop(sprintf("❌ Sync failed (exit %d). Fix the template: %s", status, template_path))
+  stop(sprintf("❌ Sync failed (exit %d). Fix the template in '%s' branch.", status, dev_branch))
 }
 
 message("✅ Sync complete! 🎉")
+
+# Restore --- checkout dev/ from dev_scripts branch -----------
+
+message(sprintf("📂 Restoring dev/ from '%s' branch...", dev_branch))
+run_git("checkout", dev_branch, "--", "dev/")
+message("📂 dev/ restored! 🎯")
+
+# Commit --- add dev/ back to history -------------------------
+
+run_git("add", "dev/")
+run_git("commit", "-m", "chore: preserve dev/ after upstream sync")
+message("📝 dev/ committed!")
 
 # Housekeeping --- re-add dev/ exclusion to .Rbuildignore ------
 
@@ -113,8 +139,12 @@ if (!has_dev_entry) {
   writeLines(c(rbuildignore, dev_pattern), rbuildignore_path)
   run_git("add", ".Rbuildignore")
   run_git("commit", "--amend", "--no-edit")
-  run_git("push", "origin", branch, "--force")
-  message("📝 .Rbuildignore patched and pushed!")
-} else {
-  message("📝 .Rbuildignore already excludes dev/ — skipping.")
+  message("📝 .Rbuildignore patched!")
 }
+
+# Push --- force push to origin --------------------------------
+
+run_git("push", "origin", branch, "--force")
+message("🚀 Pushed to origin!")
+
+message("🎉 All done! main is synced with upstream + dev/ preserved!")
