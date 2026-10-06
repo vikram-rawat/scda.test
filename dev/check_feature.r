@@ -18,47 +18,32 @@ if (nchar(branch_name) == 0L) {
   stop("🚨 Branch name cannot be empty!")
 }
 
-# Branch --- create feature branch (via shell template) -------
+# Branch --- check if exists, create or switch ----------------
 
-template_file <- if (is_windows) "check_feature.ps1" else "check_feature.sh"
-template_ref <- sprintf("%s:dev/scripts/%s", dev_branch, template_file)
+all_branches <- run_git("branch", "-a")
+branch_exists <- any(grepl(sprintf("/%s$|^..%s$", branch_name, branch_name), all_branches))
 
-template_content <- tryCatch(
-  run_git("show", template_ref),
-  error = function(e) {
-    stop(sprintf("🚨 Template not found in branch '%s': %s", dev_branch, template_ref))
+if (branch_exists) {
+  message(sprintf("⚠️  Branch '%s' already exists!", branch_name))
+  action <- tolower(trimws(readline("   [s]witch to it / [d]elete & recreate / [q]uit? ")))
+
+  if (action == "q") {
+    stop("🛑 Aborted by user.")
+  } else if (action == "d") {
+    message(sprintf("🗑️  Deleting '%s'...", branch_name))
+    run_git("checkout", branch)
+    tryCatch(run_git("branch", "-D", branch_name), error = function(e) NULL)
+    tryCatch(run_git("push", "origin", "--delete", branch_name), error = function(e) NULL)
+    run_git("checkout", "-b", branch_name)
+    message(sprintf("🌿 Branch '%s' recreated fresh from '%s'!", branch_name, branch))
+  } else {
+    run_git("checkout", branch_name)
+    run_git("fetch", "origin", branch_name)
+    message(sprintf("🔀 Switched to existing branch '%s'.", branch_name))
   }
-)
-
-filled_script <- glue::glue(
-  paste(template_content, collapse = "\n"),
-  branch_name = branch_name,
-  .open = "{{",
-  .close = "}}"
-)
-
-tmp <- tempfile(fileext = if (is_windows) ".ps1" else ".sh")
-on.exit(unlink(tmp), add = TRUE)
-writeLines(filled_script, tmp)
-
-if (is_windows) {
-  shell_cmd <- "powershell"
-  shell_args <- c("-ExecutionPolicy", "Bypass", "-File", tmp)
 } else {
-  Sys.chmod(tmp, "755")
-  shell_cmd <- "bash"
-  shell_args <- tmp
-}
-
-message(sprintf("▶️  Creating branch '%s'...", branch_name))
-
-result <- system2(shell_cmd, shell_args, stdout = TRUE, stderr = TRUE)
-status <- attr(result, "status")
-if (is.null(status)) status <- 0L
-cat(result, sep = "\n")
-
-if (status != 0L) {
-  stop(sprintf("❌ Branch creation failed (exit %d).", status))
+  run_git("checkout", "-b", branch_name)
+  message(sprintf("🌿 Branch '%s' created from '%s'!", branch_name, branch))
 }
 
 # DESCRIPTION --- update Remotes entry ------------------------
@@ -90,9 +75,19 @@ message(sprintf("📝 DESCRIPTION updated:\n   Old: %s\n   New: %s", trimws(old_
 # Push --- commit and push ------------------------------------
 
 run_git("add", "DESCRIPTION")
-run_git("commit", "-m", sprintf("'feat: test %s@%s'", package, branch_name))
-run_git("push", "origin", branch_name)
 
-message(sprintf("🚀 Pushed! Now go run the workflow on branch '%s'", branch_name))
+# Check if there's actually something to commit
+staged <- run_git("diff", "--cached", "--name-only")
+
+if (length(staged) > 0L && any(nchar(staged) > 0L)) {
+  run_git("commit", "-m", sprintf("'feat: test %s@%s'", package, branch_name))
+  run_git("push", "origin", branch_name)
+  message(sprintf("🚀 Pushed! Now go run the workflow on branch '%s'", branch_name))
+} else {
+  message("ℹ️  DESCRIPTION unchanged — nothing to commit.")
+  run_git("push", "origin", branch_name)
+  message(sprintf("🚀 Branch '%s' is up to date on origin.", branch_name))
+}
+
 message("🔗 https://github.com/vikram-rawat/scda.test/actions")
 message("🎉 Feature branch ready!")
