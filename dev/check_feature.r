@@ -66,7 +66,8 @@ if (status != 0L) {
 desc_path <- file.path(repo_root, "DESCRIPTION")
 desc_lines <- readLines(desc_path)
 
-pkg_pattern <- sprintf("(\\S+/%s)@\\S+", package)
+# Match org/package@branch but stop before comma if present
+pkg_pattern <- sprintf("(\\S+/%s)@[^, ]+", package)
 match_idx <- grep(pkg_pattern, desc_lines, ignore.case = TRUE)
 
 if (length(match_idx) == 0L) {
@@ -75,7 +76,7 @@ if (length(match_idx) == 0L) {
 
 old_line <- desc_lines[match_idx]
 new_line <- sub(
-  sprintf("(\\S+/%s)@\\S+", package),
+  sprintf("(\\S+/%s)@[^, ]+", package),
   sprintf("\\1@%s", branch_name),
   old_line,
   ignore.case = TRUE
