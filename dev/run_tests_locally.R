@@ -1,8 +1,9 @@
 # run_tests_locally.r --- Install deps & run tests locally -----
 #
-# Reads DESCRIPTION dynamically. Installs GitHub remotes first,
-# then any missing CRAN deps. Verifies all packages load.
-# Runs the full test suite. Works on Windows and Linux.
+# Reads DESCRIPTION dynamically. Installs GitHub remotes first
+# (always, because branches move), then ensures ALL remaining
+# CRAN deps are installed. Runs the full test suite.
+# Works on Windows and Linux.
 
 # Preflight ---- check pak -----------------------------------------------------
 
@@ -11,9 +12,11 @@ if (!requireNamespace("pak", quietly = TRUE)) {
   install.packages("pak")
 }
 
-# Packages used in tests but not listed in DESCRIPTION.
+# Safety net ---- packages used in tests but not in DESCRIPTION ----------------
+# These are used in tests/testthat/source_code/*.R via library() or ::.
 # Base R packages (grid, stats, tools, utils) are always available.
-extra_pkgs <- c("readxl", "rlang", "stringi", "tidytlg", "vctrs", "testthat")
+# If these ever get added to DESCRIPTION, pak will just skip them.
+extra_pkgs <- c("readxl", "rlang", "stringi", "tidytlg", "vctrs")
 missing_extras <- extra_pkgs[
   !vapply(extra_pkgs, requireNamespace, logical(1), quietly = TRUE)
 ]
@@ -28,8 +31,9 @@ if (length(missing_extras) > 0L) {
 
 # Helper ---- find repo root cross-platform -----------------------------------
 
+# Tries git first, falls back to walking up from getwd().
+# normalizePath() converts Git Bash paths (/c/Users/...) to native Windows paths.
 find_repo_root <- function() {
-  # Try git first
   root <- tryCatch(
     normalizePath(trimws(system2(
       "git",
@@ -43,7 +47,7 @@ find_repo_root <- function() {
     return(root)
   }
 
-  # Fallback: walk up from working directory
+  # Fallback: walk up from working directory to find DESCRIPTION
   candidate <- getwd()
   while (!file.exists(file.path(candidate, "DESCRIPTION"))) {
     parent <- dirname(candidate)
@@ -65,7 +69,7 @@ parse_desc_field <- function(field, lines) {
     return(character(0))
   }
 
-  # Grab the first line content after the field name
+  # Grab content on the same line as the field name
   first_line <- sub(sprintf("^%s:\\s*", field), "", lines[start])
   field_lines <- first_line
 
@@ -83,6 +87,7 @@ parse_desc_field <- function(field, lines) {
 
 # Helper ---- parse Remotes field into GitHub refs ----------------------------
 
+# Handles: "org/pkg@branch", "org/pkg" (no branch), "org/pkg#123" (PR)
 parse_remotes <- function(lines) {
   start <- grep("^Remotes:", lines)
   if (length(start) == 0L) {
@@ -111,11 +116,10 @@ if (length(remotes_refs) == 0L) {
   stop("🚨 No Remotes: field found in DESCRIPTION!")
 }
 
-# Extract bare package names from remotes
-# Handles: "org/pkg@branch", "org/pkg" (no branch), "org/pkg#123" (PR)
+# Package names covered by Remotes (e.g., "pharmaverse/tern@main" -> "tern")
 remotes_pkg_names <- tolower(gsub(".*/([^@#]+).*", "\\1", remotes_refs))
 
-# Parse ALL dependency fields
+# ALL packages from every dependency field
 dep_fields <- c("Depends", "Imports", "Suggests", "Enhances", "LinkingTo")
 all_desc_pkgs <- unique(unlist(lapply(
   dep_fields,
@@ -123,26 +127,25 @@ all_desc_pkgs <- unique(unlist(lapply(
   lines = desc_lines
 )))
 
-# Split: GitHub vs CRAN
+# CRAN packages = everything NOT covered by a Remote
 cran_pkgs <- all_desc_pkgs[!tolower(all_desc_pkgs) %in% remotes_pkg_names]
 
-# Install ---- GitHub remotes --------------------------------------------------
+# Install ---- GitHub remotes (always, branches move) --------------------------
 
 message(sprintf("📦 Installing %d GitHub packages...", length(remotes_refs)))
 pak::pak(remotes_refs, ask = FALSE)
 
-# Install ---- missing CRAN deps ----------------------------------------------
+# Install ---- ALL CRAN deps (pak skips already-installed) ---------------------
 
-missing <- cran_pkgs[
-  !vapply(cran_pkgs, requireNamespace, logical(1), quietly = TRUE)
-]
+message(
+  sprintf(
+    "📦 Ensuring %d CRAN packages are installed...",
+    length(cran_pkgs)
+  )
+)
+pak::pak(cran_pkgs, ask = FALSE)
 
-if (length(missing) > 0L) {
-  message(sprintf("📦 Installing %d missing CRAN deps...", length(missing)))
-  pak::pak(missing, ask = FALSE)
-}
-
-# Verify ---- check ALL packages are loadable ----------------------------------
+# Verify ---- check every package loads ----------------------------------------
 
 failed <- character(0)
 for (pkg in all_desc_pkgs) {
@@ -172,6 +175,14 @@ message(sprintf(
 ))
 
 # Run ---- full test suite -----------------------------------------------------
+
+# Attach Depends: packages — test_dir() doesn't auto-attach them
+# like R CMD check does. Without this, exported functions like
+# var_relabel() from formatters are not found.
+depends_pkgs <- parse_desc_field("Depends", desc_lines)
+for (pkg in depends_pkgs) {
+  suppressPackageStartupMessages(library(pkg, character.only = TRUE))
+}
 
 message("🧪 Running tests...")
 Sys.setenv(NOT_CRAN = "true")
