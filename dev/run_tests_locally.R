@@ -107,23 +107,13 @@ cran_pkgs <- all_desc_pkgs[!tolower(all_desc_pkgs) %in% remotes_pkg_names]
 
 # Remove ---- wipe Remotes packages (must run before any library() call) -------
 
-installed_remotes <- remotes_pkg_names[
-  vapply(remotes_pkg_names, requireNamespace, logical(1), quietly = TRUE)
-]
+# Check installed without loading (packageVersion reads DESCRIPTION on disk).
+installed_remotes <- remotes_pkg_names[vapply(
+  remotes_pkg_names,
+  function(p) !inherits(tryCatch(packageVersion(p), error = identity), "error"),
+  logical(1)
+)]
 if (length(installed_remotes) > 0L) {
-  # Guard: abort if any Remotes package is already loaded in this session.
-  loaded <- installed_remotes[vapply(
-    installed_remotes,
-    isNamespaceLoaded,
-    logical(1)
-  )]
-  if (length(loaded) > 0L) {
-    stop(sprintf(
-      "🚨 Restart R first! These packages are loaded: %s",
-      paste(loaded, collapse = ", ")
-    ))
-  }
-
   message(sprintf(
     "🗑️ Removing %d Remotes packages: %s",
     length(installed_remotes),
