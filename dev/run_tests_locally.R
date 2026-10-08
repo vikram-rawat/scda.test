@@ -1,27 +1,13 @@
 # run_tests_locally.r --- Install deps & run tests locally -----
 # Parses DESCRIPTION. Prioritizes Remotes (GitHub) over CRAN.
-# Only installs missing packages. Works on Windows and Linux.
+# Removes + reinstalls all Remotes for branch sync.
+# Works on Windows and Linux. Run in a FRESH R session.
 
 # Preflight ---- pak -----------------------------------------------------------
 
 if (!requireNamespace("pak", quietly = TRUE)) {
   message("📦 Installing pak...")
   install.packages("pak")
-}
-
-# Safety net ---- used in tests but not in DESCRIPTION ------------------------
-
-extra_pkgs <- c("readxl", "rlang", "stringi", "tidytlg", "vctrs")
-missing_extras <- extra_pkgs[
-  !vapply(extra_pkgs, requireNamespace, logical(1), quietly = TRUE)
-]
-if (length(missing_extras) > 0L) {
-  message(sprintf(
-    "📦 Installing %d unlisted deps: %s",
-    length(missing_extras),
-    paste(missing_extras, collapse = ", ")
-  ))
-  pak::pak(missing_extras, ask = FALSE)
 }
 
 # Helper ---- find repo root ---------------------------------------------------
@@ -103,13 +89,12 @@ if (length(remotes_refs) == 0L) {
 }
 
 # Extract pkg name: "org/pkg@branch/thing" -> "pkg"
-remotes_pkg_names <- vapply(
+remotes_pkg_names <- tolower(vapply(
   remotes_refs,
   function(ref) sub("@.*$", "", sub("^[^/]+/", "", ref)),
   character(1),
   USE.NAMES = FALSE
-) |>
-  tolower()
+))
 
 dep_fields <- c("Depends", "Imports", "Suggests", "Enhances", "LinkingTo")
 all_desc_pkgs <- unique(unlist(lapply(
@@ -120,25 +105,55 @@ all_desc_pkgs <- unique(unlist(lapply(
 
 cran_pkgs <- all_desc_pkgs[!tolower(all_desc_pkgs) %in% remotes_pkg_names]
 
-# Install ---- Remotes: remove + reinstall all (ensure branch sync) ------------
+# Remove ---- wipe Remotes packages (must run before any library() call) -------
 
 installed_remotes <- remotes_pkg_names[
   vapply(remotes_pkg_names, requireNamespace, logical(1), quietly = TRUE)
 ]
 if (length(installed_remotes) > 0L) {
+  # Guard: abort if any Remotes package is already loaded in this session.
+  loaded <- installed_remotes[vapply(
+    installed_remotes,
+    isNamespaceLoaded,
+    logical(1)
+  )]
+  if (length(loaded) > 0L) {
+    stop(sprintf(
+      "🚨 Restart R first! These packages are loaded: %s",
+      paste(loaded, collapse = ", ")
+    ))
+  }
+
   message(sprintf(
-    "🗑️ Removing %d Remotes packages for fresh install: %s",
+    "🗑️ Removing %d Remotes packages: %s",
     length(installed_remotes),
     paste(installed_remotes, collapse = ", ")
   ))
   suppressMessages(remove.packages(installed_remotes))
 }
 
+# Install ---- Remotes (fresh from GitHub) -------------------------------------
+
 message(sprintf(
   "📦 Installing %d GitHub packages...",
   length(remotes_refs)
 ))
 pak::pak(remotes_refs, ask = FALSE)
+
+# Safety net ---- used in tests but not in DESCRIPTION ------------------------
+
+extra_pkgs <- c("readxl", "rlang", "stringi", "tidytlg", "vctrs")
+missing_extras <- extra_pkgs[
+  !vapply(extra_pkgs, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_extras) > 0L) {
+  message(sprintf(
+    "📦 Installing %d unlisted deps: %s",
+    length(missing_extras),
+    paste(missing_extras, collapse = ", ")
+  ))
+  pak::pak(missing_extras, ask = FALSE)
+}
 
 # Install ---- CRAN deps, only if missing --------------------------------------
 
