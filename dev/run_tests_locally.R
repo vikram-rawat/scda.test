@@ -102,7 +102,14 @@ if (length(remotes_refs) == 0L) {
   stop("🚨 No Remotes: field found in DESCRIPTION!")
 }
 
-remotes_pkg_names <- tolower(gsub(".*/([^@#]+).*", "\\1", remotes_refs))
+# Extract pkg name: "org/pkg@branch/thing" -> "pkg"
+remotes_pkg_names <- vapply(
+  remotes_refs,
+  function(ref) sub("@.*$", "", sub("^[^/]+/", "", ref)),
+  character(1),
+  USE.NAMES = FALSE
+) |>
+  tolower()
 
 dep_fields <- c("Depends", "Imports", "Suggests", "Enhances", "LinkingTo")
 all_desc_pkgs <- unique(unlist(lapply(
@@ -113,18 +120,25 @@ all_desc_pkgs <- unique(unlist(lapply(
 
 cran_pkgs <- all_desc_pkgs[!tolower(all_desc_pkgs) %in% remotes_pkg_names]
 
-# Install ---- Remotes first, only if missing ----------------------------------
+# Install ---- Remotes: remove + reinstall all (ensure branch sync) ------------
 
-missing_remotes <- remotes_refs[
-  !vapply(remotes_pkg_names, requireNamespace, logical(1), quietly = TRUE)
+installed_remotes <- remotes_pkg_names[
+  vapply(remotes_pkg_names, requireNamespace, logical(1), quietly = TRUE)
 ]
-if (length(missing_remotes) > 0L) {
+if (length(installed_remotes) > 0L) {
   message(sprintf(
-    "📦 Installing %d GitHub packages...",
-    length(missing_remotes)
+    "🗑️ Removing %d Remotes packages for fresh install: %s",
+    length(installed_remotes),
+    paste(installed_remotes, collapse = ", ")
   ))
-  pak::pak(missing_remotes, ask = FALSE)
+  suppressMessages(remove.packages(installed_remotes))
 }
+
+message(sprintf(
+  "📦 Installing %d GitHub packages...",
+  length(remotes_refs)
+))
+pak::pak(remotes_refs, ask = FALSE)
 
 # Install ---- CRAN deps, only if missing --------------------------------------
 
