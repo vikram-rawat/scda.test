@@ -3,13 +3,17 @@
 # Config --- user inputs --------------------------------------
 
 if (!interactive()) {
-  stop("🚨 This script needs interactive mode for readline(). Run in RStudio/Positron!")
+  stop(
+    "🚨 This script needs interactive mode for readline(). Run in RStudio/Positron!"
+  )
 }
 
 branch_name <- readline("🌿 Branch name: ")
-package     <- readline("📦 Package name (default: junco): ")
+package <- readline("📦 Package name (default: junco): ")
 
-if (nchar(trimws(package)) == 0L) package <- "junco"
+if (nchar(trimws(package)) == 0L) {
+  package <- "junco"
+}
 
 package <- tolower(trimws(package))
 branch_name <- trimws(branch_name)
@@ -21,11 +25,16 @@ if (nchar(branch_name) == 0L) {
 # Branch --- check if exists, create or switch ----------------
 
 all_branches <- run_git("branch", "-a")
-branch_exists <- any(grepl(sprintf("/%s$|^..%s$", branch_name, branch_name), all_branches))
+branch_exists <- any(grepl(
+  sprintf("/%s$|^..%s$", branch_name, branch_name),
+  all_branches
+))
 
 if (branch_exists) {
   message(sprintf("⚠️  Branch '%s' already exists!", branch_name))
-  action <- tolower(trimws(readline("   [s]witch to it / [d]elete & recreate / [q]uit? ")))
+  action <- tolower(trimws(readline(
+    "   [s]witch to it / [d]elete & recreate / [q]uit? "
+  )))
 
   if (action == "q") {
     stop("🛑 Aborted by user.")
@@ -33,12 +42,24 @@ if (branch_exists) {
     message(sprintf("🗑️  Deleting '%s'...", branch_name))
     run_git("checkout", branch)
     tryCatch(run_git("branch", "-D", branch_name), error = function(e) NULL)
-    tryCatch(run_git("push", "origin", "--delete", branch_name), error = function(e) NULL)
+    tryCatch(
+      run_git("push", "origin", "--delete", branch_name),
+      error = function(e) NULL
+    )
     run_git("checkout", "-b", branch_name)
-    message(sprintf("🌿 Branch '%s' recreated fresh from '%s'!", branch_name, branch))
+    message(sprintf(
+      "🌿 Branch '%s' recreated fresh from '%s'!",
+      branch_name,
+      branch
+    ))
   } else {
     run_git("checkout", branch_name)
-    run_git("fetch", "origin", branch_name)
+    tryCatch(run_git("fetch", "origin", branch_name), error = function(e) {
+      message(sprintf(
+        "ℹ️  Remote branch '%s' not found on origin — skipping fetch.",
+        branch_name
+      ))
+    })
     message(sprintf("🔀 Switched to existing branch '%s'.", branch_name))
   }
 } else {
@@ -56,7 +77,32 @@ pkg_pattern <- sprintf("(\\S+/%s)@[^, ]+", package)
 match_idx <- grep(pkg_pattern, desc_lines, ignore.case = TRUE)
 
 if (length(match_idx) == 0L) {
-  stop(sprintf("🚨 Package '%s' not found in DESCRIPTION Remotes!", package))
+  # Package not in Remotes — try to find its org from Depends/Imports/Suggests
+  # and add a new Remotes entry
+  remotes_start <- grep("^Remotes:", desc_lines)
+  if (length(remotes_start) == 0L) {
+    stop("🚨 No Remotes section found in DESCRIPTION!")
+  }
+  # Find last indented line after Remotes:
+  remotes_end <- remotes_start
+  for (i in seq(remotes_start + 1L, length(desc_lines))) {
+    if (grepl("^\\s+", desc_lines[i]) && !grepl("^\\S+:", desc_lines[i])) {
+      remotes_end <- i
+    } else {
+      break
+    }
+  }
+  new_remote <- sprintf("    pharmaverse/%s@%s", package, branch_name)
+  # Append comma to current last Remotes line if it doesn't have one
+  if (!grepl(",\\s*$", desc_lines[remotes_end])) {
+    desc_lines[remotes_end] <- paste0(desc_lines[remotes_end], ",")
+  }
+  desc_lines <- append(desc_lines, new_remote, after = remotes_end)
+  writeLines(desc_lines, desc_path)
+  message(sprintf("📝 Added '%s' to Remotes: %s", package, trimws(new_remote)))
+  # Re-read and re-match for the update step below
+  desc_lines <- readLines(desc_path)
+  match_idx <- grep(pkg_pattern, desc_lines, ignore.case = TRUE)
 }
 
 old_line <- desc_lines[match_idx]
@@ -70,7 +116,11 @@ new_line <- sub(
 desc_lines[match_idx] <- new_line
 writeLines(desc_lines, desc_path)
 
-message(sprintf("📝 DESCRIPTION updated:\n   Old: %s\n   New: %s", trimws(old_line), trimws(new_line)))
+message(sprintf(
+  "📝 DESCRIPTION updated:\n   Old: %s\n   New: %s",
+  trimws(old_line),
+  trimws(new_line)
+))
 
 # Push --- commit and push ------------------------------------
 
@@ -82,7 +132,10 @@ staged <- run_git("diff", "--cached", "--name-only")
 if (length(staged) > 0L && any(nchar(staged) > 0L)) {
   run_git("commit", "-m", sprintf("'feat: test %s@%s'", package, branch_name))
   run_git("push", "origin", branch_name)
-  message(sprintf("🚀 Pushed! Now go run the workflow on branch '%s'", branch_name))
+  message(sprintf(
+    "🚀 Pushed! Now go run the workflow on branch '%s'",
+    branch_name
+  ))
 } else {
   message("ℹ️  DESCRIPTION unchanged — nothing to commit.")
   run_git("push", "origin", branch_name)
