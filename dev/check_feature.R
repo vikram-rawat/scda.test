@@ -22,6 +22,16 @@ if (nchar(branch_name) == 0L) {
   stop("🚨 Branch name cannot be empty!")
 }
 
+# Required Remotes --- must always be in DESCRIPTION ----------
+# Format: "org/package@default_branch"
+# These are ensured on every run; missing ones get added.
+
+required_remotes <- c(
+  "johnsonandjohnson/junco@dev",
+  "johnsonandjohnson/pharmaverseadamjnj@main",
+  "johnsonandjohnson/pharmaversesdtmjnj@main"
+)
+
 # Branch --- check if exists, create or switch ----------------
 
 all_branches <- run_git("branch", "-a")
@@ -67,42 +77,71 @@ if (branch_exists) {
   message(sprintf("🌿 Branch '%s' created from '%s'!", branch_name, branch))
 }
 
-# DESCRIPTION --- update Remotes entry ------------------------
+# DESCRIPTION --- ensure required Remotes exist ---------------
 
 desc_path <- file.path(repo_root, "DESCRIPTION")
 desc_lines <- readLines(desc_path)
 
-# Match org/package@branch but stop before comma if present
+remotes_start <- grep("^Remotes:", desc_lines)
+if (length(remotes_start) == 0L) {
+  stop("🚨 No Remotes section found in DESCRIPTION!")
+}
+
+# Find the last line of the Remotes block
+remotes_end <- remotes_start
+for (i in seq(remotes_start + 1L, length(desc_lines))) {
+  if (grepl("^\\s+", desc_lines[i]) && !grepl("^\\S+:", desc_lines[i])) {
+    remotes_end <- i
+  } else {
+    break
+  }
+}
+
+added <- 0L
+for (remote in required_remotes) {
+  pkg_name <- sub("^.+/(.+)@.+$", "\\1", remote)
+  search_pat <- sprintf("\\b%s@", pkg_name)
+  hit <- grep(
+    search_pat,
+    desc_lines[remotes_start:remotes_end],
+    ignore.case = TRUE
+  )
+
+  if (length(hit) > 0L) {
+    # Already present — leave as-is
+  } else {
+    # Package missing — add it
+    if (!grepl(",\\s*$", desc_lines[remotes_end])) {
+      desc_lines[remotes_end] <- paste0(desc_lines[remotes_end], ",")
+    }
+    desc_lines <- append(
+      desc_lines,
+      sprintf("    %s", remote),
+      after = remotes_end
+    )
+    remotes_end <- remotes_end + 1L
+    added <- added + 1L
+    message(sprintf("➕ Added missing Remote: %s", remote))
+  }
+}
+
+if (added > 0L) {
+  writeLines(desc_lines, desc_path)
+  message(sprintf("📝 %d missing Remote(s) added to DESCRIPTION.", added))
+  # Re-read after additions
+  desc_lines <- readLines(desc_path)
+}
+
+# DESCRIPTION --- update target package to feature branch -----
+
 pkg_pattern <- sprintf("(\\S+/%s)@[^, ]+", package)
 match_idx <- grep(pkg_pattern, desc_lines, ignore.case = TRUE)
 
 if (length(match_idx) == 0L) {
-  # Package not in Remotes — try to find its org from Depends/Imports/Suggests
-  # and add a new Remotes entry
-  remotes_start <- grep("^Remotes:", desc_lines)
-  if (length(remotes_start) == 0L) {
-    stop("🚨 No Remotes section found in DESCRIPTION!")
-  }
-  # Find last indented line after Remotes:
-  remotes_end <- remotes_start
-  for (i in seq(remotes_start + 1L, length(desc_lines))) {
-    if (grepl("^\\s+", desc_lines[i]) && !grepl("^\\S+:", desc_lines[i])) {
-      remotes_end <- i
-    } else {
-      break
-    }
-  }
-  new_remote <- sprintf("    pharmaverse/%s@%s", package, branch_name)
-  # Append comma to current last Remotes line if it doesn't have one
-  if (!grepl(",\\s*$", desc_lines[remotes_end])) {
-    desc_lines[remotes_end] <- paste0(desc_lines[remotes_end], ",")
-  }
-  desc_lines <- append(desc_lines, new_remote, after = remotes_end)
-  writeLines(desc_lines, desc_path)
-  message(sprintf("📝 Added '%s' to Remotes: %s", package, trimws(new_remote)))
-  # Re-read and re-match for the update step below
-  desc_lines <- readLines(desc_path)
-  match_idx <- grep(pkg_pattern, desc_lines, ignore.case = TRUE)
+  stop(sprintf(
+    "🚨 Package '%s' still not found in Remotes after ensure step!",
+    package
+  ))
 }
 
 old_line <- desc_lines[match_idx]
@@ -126,7 +165,6 @@ message(sprintf(
 
 run_git("add", "DESCRIPTION")
 
-# Check if there's actually something to commit
 staged <- run_git("diff", "--cached", "--name-only")
 
 if (length(staged) > 0L && any(nchar(staged) > 0L)) {
