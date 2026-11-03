@@ -53,11 +53,12 @@ VignetteBuilder:
     knitr
 Remotes:
     pharmaverse/formatters@main,
-    pharmaverse/pharmaverseadam@main,
     pharmaverse/rlistings@main,
     pharmaverse/rtables@main,
     pharmaverse/tern@main,
-    pharmaverse/junco@fix/438-response-by-var-bug-refactor
+    johnsonandjohnson/pharmaversesdtmjnj@main,
+    johnsonandjohnson/pharmaverseadamjnj@main,
+    johnsonandjohnson/junco@fix/438-response-by-var-bug-refactor
 biocViews:
 Config/Needs/website: insightsengineering/nesttemplate
 Config/roxygen2/version: 8.1.1
